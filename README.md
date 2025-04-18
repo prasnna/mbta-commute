@@ -47,10 +47,26 @@ This project contains tools to help manage commutes on the MBTA system, includin
 
 ### Usage
 
+#### Using Batch Scripts (Recommended)
+
+The easiest way to use this tool is with the provided batch scripts:
+
+```
+start_all.bat
+```
+
+This will start all three services in separate windows.
+
 #### Monitor Red Line Arrivals
 
 ```
-python src/redline.py
+python src/red_line.py
+```
+
+Or use the batch script:
+
+```
+src/Red_Line_Script.bat
 ```
 
 This will monitor Red Line train arrivals and notify you when it's time to leave.
@@ -58,7 +74,13 @@ This will monitor Red Line train arrivals and notify you when it's time to leave
 #### Monitor Bus 226 Arrivals
 
 ```
-python src/bus226.py
+python src/bus_226.py
+```
+
+Or use the batch script:
+
+```
+src/226_Bus_Script.bat
 ```
 
 This will monitor Bus 226 arrivals and notify you when it's time to leave.
@@ -67,6 +89,12 @@ This will monitor Bus 226 arrivals and notify you when it's time to leave.
 
 ```
 python src/commute_bridge.py
+```
+
+Or use the batch script:
+
+```
+src/Commute_Bridge_Script.bat
 ```
 
 This will coordinate between Red Line trains and Bus 226 to find optimal connections.
