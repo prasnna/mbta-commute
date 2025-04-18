@@ -1,0 +1,1 @@
+"C:\softies\Python38\python.exe" "%~dp0..\redline.py" "> log.txt"
