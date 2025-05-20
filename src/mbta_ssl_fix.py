@@ -31,10 +31,16 @@ class PyMBTA3SSL(object):
     _MBTA_V3_API_URL = 'https://api-v3.mbta.com'
 
     def __init__(self, key: str = None, use_curl_cffi: bool = True):
-        """ Initialize the class
+        """Initialize the class
+
         Keyword Arguments:
             key: MBTA v3 api key
-            use_curl_cffi: Whether to use curl_cffi (if available) or requests with SSL verification disabled
+            use_curl_cffi: Whether to use curl_cffi (if available) or requests
+                for API calls.
+        
+        SSL certificate verification can be controlled with the
+        ``MBTA_SSL_VERIFY`` environment variable. Set it to ``False`` or ``0``
+        to disable verification. By default SSL verification is enabled.
         """
         if key is None:
             key = os.getenv('MBTA_API_KEY')
@@ -44,13 +50,23 @@ class PyMBTA3SSL(object):
                              'from the MBTA website: https://api-v3.mbta.com/')
 
         self.key = key
+
+        verify_env = os.getenv("MBTA_SSL_VERIFY", "true")
+        self.ssl_verify = str(verify_env).lower() not in ("0", "false", "no")
+
         self.use_curl_cffi = use_curl_cffi and CURL_CFFI_AVAILABLE
 
         if self.use_curl_cffi:
-            print("Using curl_cffi for MBTA API requests with SSL verification disabled")
-            self.session = curl_requests.Session(impersonate="chrome", verify=False)
+            print(
+                f"Using curl_cffi for MBTA API requests (SSL verify={self.ssl_verify})"
+            )
+            self.session = curl_requests.Session(
+                impersonate="chrome", verify=self.ssl_verify
+            )
         else:
-            print("Using requests for MBTA API requests with SSL verification disabled")
+            print(
+                f"Using requests for MBTA API requests (SSL verify={self.ssl_verify})"
+            )
             self.session = requests.Session()
 
         self.headers = {"X-API-Key": self.key, "accept": 'application/vnd.api+json'}
@@ -125,8 +141,10 @@ class PyMBTA3SSL(object):
                 # Option 1: Using curl_cffi
                 response = self.session.get(url, headers=self.headers)
             else:
-                # Option 2: Using standard requests with verification disabled
-                response = self.session.get(url, headers=self.headers, verify=False)
+                # Option 2: Using standard requests
+                response = self.session.get(
+                    url, headers=self.headers, verify=self.ssl_verify
+                )
 
             json_response = response.json()
             if not json_response:

@@ -43,6 +43,7 @@ This project contains tools to help manage commutes on the MBTA system, includin
    ```
    cp .env.sample .env
    # Edit .env with your MBTA API key
+   # Optionally set MBTA_SSL_VERIFY=False if you need to disable SSL verification
    ```
 
 ### Usage
@@ -104,6 +105,8 @@ This will coordinate between Red Line trains and Bus 226 to find optimal connect
 The application uses environment variables for configuration:
 
 - `MBTA_API_KEY`: Your MBTA API key
+- `MBTA_SSL_VERIFY`: Set to `False` to disable SSL certificate verification if
+  you encounter SSL issues. Defaults to `True`.
 
 ## Security Notes
 
