@@ -89,8 +89,8 @@ def check_red_line():
             diff = [lead_times[i] - lead_times[i-1] for i in range(1, len(lead_times))]
             print("\nTime gaps between trains (minutes):", diff)
 
-            # Calculate average time between trains, minus a buffer
-            raw_loop_time = np.mean(diff) - 5 if diff else 10
+            # Calculate median time between trains, minus a buffer
+            raw_loop_time = np.median(diff) - 5 if diff else 10
             loop_time = max(3, raw_loop_time)  # Ensure minimum loop time of 3 minutes
             print(f"Calculated check interval: {loop_time:.1f} minutes")
         else:
