@@ -5,7 +5,6 @@ from tkinter import messagebox
 import time as t
 import numpy as np
 import os
-import threading
 from dotenv import load_dotenv
 
 # Import the SSL-fixed version of Predictions
@@ -22,18 +21,12 @@ except ImportError:
 load_dotenv()
 
 
-def show_non_blocking_alert(title, message):
-    """Show a non-blocking alert that doesn't pause program execution"""
-    def show_alert():
-        root = tk.Tk()
-        root.withdraw()  # Hide the main window
-        messagebox.showinfo(title, message)
-        root.destroy()
-
-    # Start alert in a separate thread
-    alert_thread = threading.Thread(target=show_alert)
-    alert_thread.daemon = True  # Thread will exit when main program exits
-    alert_thread.start()
+def show_alert(title, message):
+    """Display an alert box that blocks until the user closes it."""
+    root = tk.Tk()
+    root.withdraw()  # Hide the main window
+    messagebox.showinfo(title, message)
+    root.destroy()
 
 
 def check_red_line():
@@ -111,11 +104,11 @@ def check_red_line():
         # Determine if user should leave soon
         if 5 <= next_train <= 10:
             print("\n*** TIME TO LEAVE NOW! ***")
-            show_non_blocking_alert(
+            show_alert(
                 "Red Line Alert", f"Time to leave now! Train arriving in {next_train} minutes.")
         elif next_train > 60:
             print("\n!!! SEVERE DELAYS DETECTED !!!")
-            show_non_blocking_alert(
+            show_alert(
                 "Red Line Alert", f"Severe delays detected. Next train in {next_train} minutes.")
 
         # Print next check time
