@@ -1,14 +1,39 @@
-from pymbta3 import Predictions
 import datetime
 import math
+import tkinter as tk
 from tkinter import messagebox
 import time as t
 import numpy as np
 import os
+import threading
 from dotenv import load_dotenv
+
+# Import the SSL-fixed version of Predictions
+try:
+    # Try to use our SSL fix first
+    from mbta_ssl_fix import PredictionsSSL as Predictions
+    print("Using SSL-fixed version of MBTA API client")
+except ImportError:
+    # Fall back to original if not available
+    from pymbta3 import Predictions
+    print("Using standard pymbta3 library")
 
 # Load environment variables
 load_dotenv()
+
+
+def show_non_blocking_alert(title, message):
+    """Show a non-blocking alert that doesn't pause program execution"""
+    def show_alert():
+        root = tk.Tk()
+        root.withdraw()  # Hide the main window
+        messagebox.showinfo(title, message)
+        root.destroy()
+
+    # Start alert in a separate thread
+    alert_thread = threading.Thread(target=show_alert)
+    alert_thread.daemon = True  # Thread will exit when main program exits
+    alert_thread.start()
 
 
 def check_red_line():
@@ -18,27 +43,27 @@ def check_red_line():
     print("\n" + "=" * 60)
     print(f"RED LINE MONITOR - {current_time}")
     print("=" * 60)
-    
+
     print("Fetching Red Line predictions from MBTA API...")
-    
+
     # Get API key from environment variables
     mbta_api_key = os.environ.get('MBTA_API_KEY', 'demo')
     if mbta_api_key == 'demo':
         print("WARNING: Using demo API key. Set your MBTA_API_KEY in .env file for better results.")
-    
+
     at = Predictions(key=mbta_api_key)
 
     try:
         # Get predictions for Red Line trains (Braintree branch, northbound)
         predictions = at.get(stop=70079, direction_id=0,
                             route='Red', route_pattern='Red-3-0')
-        
+
         if not predictions.get('data'):
             print("No predictions available. Checking again in 3 minutes...")
             t.sleep(3 * 60)
             check_red_line()  # recur
             return
-            
+
         # Extract arrival times in minutes
         lead_times = []
         time_format = '%Y-%m-%dT%H:%M:%S%z'
@@ -55,10 +80,10 @@ def check_red_line():
             t.sleep(3 * 60)
             check_red_line()  # recur
             return
-            
+
         # Sort times in ascending order
         lead_times.sort()
-        
+
         # Print upcoming train times
         print("\nUPCOMING RED LINE TRAINS:")
         for i, minutes in enumerate(lead_times):
@@ -82,25 +107,25 @@ def check_red_line():
 
         # Get the next train time
         next_train = lead_times[0]
-        
+
         # Determine if user should leave soon
         if 5 <= next_train <= 10:
             print("\n*** TIME TO LEAVE NOW! ***")
-            messagebox.showinfo(
-                f"Red Line Alert", f"Time to leave now! Train arriving in {next_train} minutes.")
+            show_non_blocking_alert(
+                "Red Line Alert", f"Time to leave now! Train arriving in {next_train} minutes.")
         elif next_train > 60:
             print("\n!!! SEVERE DELAYS DETECTED !!!")
-            messagebox.showinfo(
-                f"Red Line Alert", f"Severe delays detected. Next train in {next_train} minutes.")
-        
+            show_non_blocking_alert(
+                "Red Line Alert", f"Severe delays detected. Next train in {next_train} minutes.")
+
         # Print next check time
         print(f"\nNext train in {next_train} minutes. Checking again in {loop_time:.1f} minutes...")
         print("=" * 60)
-        
+
         # Sleep before checking again
         t.sleep(int(loop_time * 60))
         check_red_line()  # recur
-        
+
     except Exception as e:
         print(f"Error fetching Red Line predictions: {str(e)}")
         print("Retrying in 5 minutes...")

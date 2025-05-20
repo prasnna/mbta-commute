@@ -1,4 +1,3 @@
-from pymbta3 import Predictions
 import datetime
 import math
 from tkinter import messagebox
@@ -6,6 +5,16 @@ import time as t
 import numpy as np
 import os
 from dotenv import load_dotenv
+
+# Import the SSL-fixed version of Predictions
+try:
+    # Try to use our SSL fix first
+    from mbta_ssl_fix import PredictionsSSL as Predictions
+    print("Using SSL-fixed version of MBTA API client")
+except ImportError:
+    # Fall back to original if not available
+    from pymbta3 import Predictions
+    print("Using standard pymbta3 library")
 
 # Load environment variables at module level
 load_dotenv()
@@ -18,14 +27,14 @@ def check_bus_226():
     print("\n" + "=" * 60)
     print(f"BUS 226 MONITOR - {current_time}")
     print("=" * 60)
-    
+
     print("Fetching Bus 226 predictions from MBTA API...")
-    
+
     # Get API key from environment variables
     mbta_api_key = os.environ.get('MBTA_API_KEY', 'demo')
     if mbta_api_key == 'demo':
         print("WARNING: Using demo API key. Set your MBTA_API_KEY in .env file for better results.")
-    
+
     at = Predictions(key=mbta_api_key)
 
     try:
@@ -33,13 +42,13 @@ def check_bus_226():
         # Using route 226, direction 0 (Outbound to Columbian Square)
         braintree_stop_id = "place-brntn"  # Braintree Station
         predictions = at.get(route='226', direction_id=0, stop=braintree_stop_id, route_pattern='226-_-0')
-        
+
         if not predictions.get('data'):
             print("No predictions available. Checking again in 3 minutes...")
             t.sleep(3 * 60)
             check_bus_226()  # recur
             return
-            
+
         # Extract arrival times in minutes
         bus_times = []
         time_format = '%Y-%m-%dT%H:%M:%S%z'
@@ -62,7 +71,7 @@ def check_bus_226():
 
         # Sort times in ascending order
         bus_times.sort()
-        
+
         # Print upcoming bus times
         print("\nUPCOMING BUS 226 DEPARTURES FROM BRAINTREE STATION:")
         for i, minutes in enumerate(bus_times):
@@ -86,7 +95,7 @@ def check_bus_226():
 
         # Get the next bus time
         next_bus = bus_times[0]
-        
+
         # Determine if user should leave soon
         if 5 <= next_bus <= 10:
             print("\n*** TIME TO LEAVE NOW! ***")
@@ -96,15 +105,15 @@ def check_bus_226():
             print("\n!!! SEVERE DELAYS DETECTED !!!")
             messagebox.showinfo(
                 f"Bus 226 Alert", f"Severe delays detected. Next bus in {next_bus} minutes.")
-        
+
         # Print next check time
         print(f"\nNext bus in {next_bus} minutes. Checking again in {loop_time:.1f} minutes...")
         print("=" * 60)
-        
+
         # Sleep before checking again
         t.sleep(int(loop_time * 60))
         check_bus_226()  # recur
-        
+
     except Exception as e:
         print(f"Error fetching Bus 226 predictions: {str(e)}")
         print("Retrying in 5 minutes...")

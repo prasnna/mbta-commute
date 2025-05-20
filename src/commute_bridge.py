@@ -1,10 +1,19 @@
-from pymbta3 import Predictions
 import datetime
 import math
 from tkinter import messagebox
 import time as t
 import os
 from dotenv import load_dotenv
+
+# Import the SSL-fixed version of Predictions
+try:
+    # Try to use our SSL fix first
+    from mbta_ssl_fix import PredictionsSSL as Predictions
+    print("Using SSL-fixed version of MBTA API client")
+except ImportError:
+    # Fall back to original if not available
+    from pymbta3 import Predictions
+    print("Using standard pymbta3 library")
 
 # Load environment variables at module level
 load_dotenv()

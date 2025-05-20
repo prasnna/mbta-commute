@@ -2,3 +2,5 @@ pymbta3>=0.1.0
 numpy>=1.19.0
 python-dotenv>=0.15.0
 tkinter>=8.6
+curl_cffi>=0.5.7
+requests>=2.25.0
