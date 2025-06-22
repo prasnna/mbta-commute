@@ -23,7 +23,6 @@ from urllib3.exceptions import InsecureRequestWarning
 import urllib3
 urllib3.disable_warnings(InsecureRequestWarning)
 
-
 class PyMBTA3SSL(object):
     """
     Modified version of PyMBTA3 class that handles SSL issues.
@@ -37,7 +36,7 @@ class PyMBTA3SSL(object):
             key: MBTA v3 api key
             use_curl_cffi: Whether to use curl_cffi (if available) or requests
                 for API calls.
-        
+
         SSL certificate verification can be controlled with the
         ``MBTA_SSL_VERIFY`` environment variable. Set it to ``False`` or ``0``
         to disable verification. By default SSL verification is enabled.
