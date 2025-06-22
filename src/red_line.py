@@ -3,7 +3,6 @@ import math
 import tkinter as tk
 from tkinter import messagebox
 import time as t
-import numpy as np
 import os
 from dotenv import load_dotenv
 
@@ -19,6 +18,23 @@ except ImportError:
 
 # Load environment variables
 load_dotenv()
+
+# --- Configuration Variables with Defaults ---
+# Alerting (Shared)
+ALERT_LEAVE_NOW_WINDOW_MIN = int(os.environ.get('MBTA_ALERT_LEAVE_NOW_WINDOW_MIN_MINUTES', '5'))
+ALERT_LEAVE_NOW_WINDOW_MAX = int(os.environ.get('MBTA_ALERT_LEAVE_NOW_WINDOW_MAX_MINUTES', '10'))
+ALERT_SEVERE_DELAY_THRESHOLD = int(os.environ.get('MBTA_ALERT_SEVERE_DELAY_THRESHOLD_MINUTES', '60'))
+
+# Retry/Sleep Durations (Shared)
+RETRY_NO_DATA_MINUTES = int(os.environ.get('MBTA_RETRY_NO_DATA_MINUTES', '3'))
+RETRY_ERROR_MINUTES = int(os.environ.get('MBTA_RETRY_ERROR_MINUTES', '5'))
+
+# Monitor Specific Loop Time Calculation
+MONITOR_MIN_LOOP_MINUTES = int(os.environ.get('MBTA_MONITOR_MIN_LOOP_MINUTES', '2'))
+MONITOR_MAX_LOOP_MINUTES = int(os.environ.get('MBTA_MONITOR_MAX_LOOP_MINUTES', '10'))
+MONITOR_CHECK_EARLY_BUFFER_MINUTES = int(os.environ.get('MBTA_MONITOR_CHECK_EARLY_BUFFER_MINUTES', '2'))
+MONITOR_SINGLE_PREDICTION_LOOP_MINUTES = int(os.environ.get('MBTA_MONITOR_SINGLE_PREDICTION_LOOP_MINUTES', '5'))
+# --- End Configuration Variables ---
 
 
 def show_alert(title, message):
@@ -52,8 +68,8 @@ def check_red_line():
                             route='Red', route_pattern='Red-3-0')
 
         if not predictions.get('data'):
-            print("No predictions available. Checking again in 3 minutes...")
-            t.sleep(3 * 60)
+            print(f"No predictions available. Checking again in {RETRY_NO_DATA_MINUTES} minutes...")
+            t.sleep(RETRY_NO_DATA_MINUTES * 60)
             check_red_line()  # recur
             return
 
@@ -69,8 +85,8 @@ def check_red_line():
                 lead_times.append(math.floor(minutes_until))
 
         if not lead_times:
-            print("No upcoming trains found. Checking again in 3 minutes...")
-            t.sleep(3 * 60)
+            print(f"No upcoming trains found. Checking again in {RETRY_NO_DATA_MINUTES} minutes...")
+            t.sleep(RETRY_NO_DATA_MINUTES * 60)
             check_red_line()  # recur
             return
 
@@ -84,45 +100,56 @@ def check_red_line():
             arrival_time = (datetime.datetime.now() + datetime.timedelta(minutes=minutes)).strftime("%I:%M %p")
             print(f"  Train {i+1}: Arriving in {minutes} minutes (at {arrival_time})")
 
-        # Calculate time gaps between trains
-        if len(lead_times) > 1:
-            diff = [lead_times[i] - lead_times[i-1] for i in range(1, len(lead_times))]
-            print("\nTime gaps between trains (minutes):", diff)
+        # --- New loop_time calculation ---
+        next_train_minutes = lead_times[0]
+        loop_time_calculated = 0
 
-            # Calculate median time between trains, minus a buffer
-            raw_loop_time = np.median(diff) - 5 if diff else 10
-            loop_time = max(3, raw_loop_time)  # Ensure minimum loop time of 3 minutes
-            print(f"Calculated check interval: {loop_time:.1f} minutes")
+        if len(lead_times) == 1:
+           loop_time_calculated = MONITOR_SINGLE_PREDICTION_LOOP_MINUTES
         else:
-            # If only one prediction, check again in a few minutes
-            loop_time = 5
-            print("Only one train prediction available. Using default check interval of 5 minutes.")
+           # If the next event is already within the "leave now" window (up to its max)
+           # or even sooner, we should check frequently.
+           if next_train_minutes <= ALERT_LEAVE_NOW_WINDOW_MAX:
+               loop_time_calculated = MONITOR_MIN_LOOP_MINUTES
+           else:
+               # Schedule the check MONITOR_CHECK_EARLY_BUFFER_MINUTES minutes before the ALERT_LEAVE_NOW_WINDOW_MAX starts.
+               # Example: next_event=20, ALERT_WINDOW_MAX=10, CHECK_EARLY_BUFFER=2.
+               # We want to check when next_event is 12 mins away (10+2). So sleep for 20 - 12 = 8 mins.
+               target_check_point = next_train_minutes - (ALERT_LEAVE_NOW_WINDOW_MAX + MONITOR_CHECK_EARLY_BUFFER_MINUTES)
 
-        # Get the next train time
-        next_train = lead_times[0]
+               if target_check_point < MONITOR_MIN_LOOP_MINUTES:
+                   loop_time_calculated = MONITOR_MIN_LOOP_MINUTES
+               else:
+                   loop_time_calculated = min(MONITOR_MAX_LOOP_MINUTES, target_check_point)
 
+        loop_time = math.floor(loop_time_calculated) # Use floor for integer minutes
+        loop_time = max(1, loop_time) # Ensure loop_time is at least 1 minute practically.
+        print(f"Calculated check interval: {loop_time} minutes")
+        # --- End new loop_time calculation ---
+
+        # Get the next train time (already have as next_train_minutes)
         # Determine if user should leave soon
-        if 5 <= next_train <= 10:
+        if ALERT_LEAVE_NOW_WINDOW_MIN <= next_train_minutes <= ALERT_LEAVE_NOW_WINDOW_MAX:
             print("\n*** TIME TO LEAVE NOW! ***")
             show_alert(
-                "Red Line Alert", f"Time to leave now! Train arriving in {next_train} minutes.")
-        elif next_train > 60:
+                "Red Line Alert", f"Time to leave now! Train arriving in {next_train_minutes} minutes.")
+        elif next_train_minutes > ALERT_SEVERE_DELAY_THRESHOLD:
             print("\n!!! SEVERE DELAYS DETECTED !!!")
             show_alert(
-                "Red Line Alert", f"Severe delays detected. Next train in {next_train} minutes.")
+                "Red Line Alert", f"Severe delays detected. Next train in {next_train_minutes} minutes.")
 
         # Print next check time
-        print(f"\nNext train in {next_train} minutes. Checking again in {loop_time:.1f} minutes...")
+        print(f"\nNext train in {next_train_minutes} minutes. Checking again in {loop_time} minutes...")
         print("=" * 60)
 
         # Sleep before checking again
-        t.sleep(int(loop_time * 60))
+        t.sleep(loop_time * 60) # loop_time is already an int due to math.floor
         check_red_line()  # recur
 
     except Exception as e:
         print(f"Error fetching Red Line predictions: {str(e)}")
-        print("Retrying in 5 minutes...")
-        t.sleep(5 * 60)
+        print(f"Retrying in {RETRY_ERROR_MINUTES} minutes...")
+        t.sleep(RETRY_ERROR_MINUTES * 60)
         check_red_line()  # recur
 
 
@@ -135,6 +162,6 @@ if __name__ == "__main__":
         print("\nExiting Red Line Monitor. Have a safe trip!")
     except Exception as e:
         print(f"\nUnexpected error: {str(e)}")
-        print("Restarting in 5 minutes...")
-        t.sleep(5 * 60)
+        print(f"Restarting in {RETRY_ERROR_MINUTES} minutes...")
+        t.sleep(RETRY_ERROR_MINUTES * 60)
         check_red_line()

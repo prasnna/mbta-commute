@@ -2,7 +2,6 @@ import datetime
 import math
 from tkinter import messagebox
 import time as t
-import numpy as np
 import os
 from dotenv import load_dotenv
 
@@ -18,6 +17,23 @@ except ImportError:
 
 # Load environment variables at module level
 load_dotenv()
+
+# --- Configuration Variables with Defaults ---
+# Alerting (Shared)
+ALERT_LEAVE_NOW_WINDOW_MIN = int(os.environ.get('MBTA_ALERT_LEAVE_NOW_WINDOW_MIN_MINUTES', '5'))
+ALERT_LEAVE_NOW_WINDOW_MAX = int(os.environ.get('MBTA_ALERT_LEAVE_NOW_WINDOW_MAX_MINUTES', '10'))
+ALERT_SEVERE_DELAY_THRESHOLD = int(os.environ.get('MBTA_ALERT_SEVERE_DELAY_THRESHOLD_MINUTES', '60'))
+
+# Retry/Sleep Durations (Shared)
+RETRY_NO_DATA_MINUTES = int(os.environ.get('MBTA_RETRY_NO_DATA_MINUTES', '3'))
+RETRY_ERROR_MINUTES = int(os.environ.get('MBTA_RETRY_ERROR_MINUTES', '5'))
+
+# Monitor Specific Loop Time Calculation (Shared with red_line.py)
+MONITOR_MIN_LOOP_MINUTES = int(os.environ.get('MBTA_MONITOR_MIN_LOOP_MINUTES', '2'))
+MONITOR_MAX_LOOP_MINUTES = int(os.environ.get('MBTA_MONITOR_MAX_LOOP_MINUTES', '10'))
+MONITOR_CHECK_EARLY_BUFFER_MINUTES = int(os.environ.get('MBTA_MONITOR_CHECK_EARLY_BUFFER_MINUTES', '2'))
+MONITOR_SINGLE_PREDICTION_LOOP_MINUTES = int(os.environ.get('MBTA_MONITOR_SINGLE_PREDICTION_LOOP_MINUTES', '5'))
+# --- End Configuration Variables ---
 
 
 def check_bus_226():
@@ -44,8 +60,8 @@ def check_bus_226():
         predictions = at.get(route='226', direction_id=0, stop=braintree_stop_id, route_pattern='226-_-0')
 
         if not predictions.get('data'):
-            print("No predictions available. Checking again in 3 minutes...")
-            t.sleep(3 * 60)
+            print(f"No predictions available. Checking again in {RETRY_NO_DATA_MINUTES} minutes...")
+            t.sleep(RETRY_NO_DATA_MINUTES * 60)
             check_bus_226()  # recur
             return
 
@@ -64,8 +80,8 @@ def check_bus_226():
 
         # Check if we have any predictions
         if not bus_times:
-            print("No upcoming buses found. Checking again in 3 minutes...")
-            t.sleep(3 * 60)
+            print(f"No upcoming buses found. Checking again in {RETRY_NO_DATA_MINUTES} minutes...")
+            t.sleep(RETRY_NO_DATA_MINUTES * 60)
             check_bus_226()  # recur
             return
 
@@ -79,45 +95,51 @@ def check_bus_226():
             departure_time = (datetime.datetime.now() + datetime.timedelta(minutes=minutes)).strftime("%I:%M %p")
             print(f"  Bus {i+1}: Departing in {minutes} minutes (at {departure_time})")
 
-        # Calculate time gaps between buses
-        if len(bus_times) > 1:
-            diff = [bus_times[i] - bus_times[i-1] for i in range(1, len(bus_times))]
-            print("\nTime gaps between buses (minutes):", diff)
+        # --- New loop_time calculation ---
+        next_bus_minutes = bus_times[0]
+        loop_time_calculated = 0
 
-            # Calculate average time between buses, minus a buffer
-            raw_loop_time = np.mean(diff) - 5 if diff else 10
-            loop_time = max(3, raw_loop_time)  # Ensure minimum loop time of 3 minutes
-            print(f"Calculated check interval: {loop_time:.1f} minutes")
+        if len(bus_times) == 1:
+           loop_time_calculated = MONITOR_SINGLE_PREDICTION_LOOP_MINUTES
         else:
-            # If only one prediction, check again in a few minutes
-            loop_time = 5
-            print("Only one bus prediction available. Using default check interval of 5 minutes.")
+           if next_bus_minutes <= ALERT_LEAVE_NOW_WINDOW_MAX:
+               loop_time_calculated = MONITOR_MIN_LOOP_MINUTES
+           else:
+               target_check_point = next_bus_minutes - (ALERT_LEAVE_NOW_WINDOW_MAX + MONITOR_CHECK_EARLY_BUFFER_MINUTES)
 
-        # Get the next bus time
-        next_bus = bus_times[0]
+               if target_check_point < MONITOR_MIN_LOOP_MINUTES:
+                   loop_time_calculated = MONITOR_MIN_LOOP_MINUTES
+               else:
+                   loop_time_calculated = min(MONITOR_MAX_LOOP_MINUTES, target_check_point)
 
+        loop_time = math.floor(loop_time_calculated)
+        loop_time = max(1, loop_time)
+        print(f"Calculated check interval: {loop_time} minutes")
+        # --- End new loop_time calculation ---
+
+        # Get the next bus time (already have as next_bus_minutes)
         # Determine if user should leave soon
-        if 5 <= next_bus <= 10:
+        if ALERT_LEAVE_NOW_WINDOW_MIN <= next_bus_minutes <= ALERT_LEAVE_NOW_WINDOW_MAX:
             print("\n*** TIME TO LEAVE NOW! ***")
             messagebox.showinfo(
-                f"Bus 226 Alert", f"Time to leave now! Bus departing in {next_bus} minutes.")
-        elif next_bus > 60:
+                f"Bus 226 Alert", f"Time to leave now! Bus departing in {next_bus_minutes} minutes.")
+        elif next_bus_minutes > ALERT_SEVERE_DELAY_THRESHOLD:
             print("\n!!! SEVERE DELAYS DETECTED !!!")
             messagebox.showinfo(
-                f"Bus 226 Alert", f"Severe delays detected. Next bus in {next_bus} minutes.")
+                f"Bus 226 Alert", f"Severe delays detected. Next bus in {next_bus_minutes} minutes.")
 
         # Print next check time
-        print(f"\nNext bus in {next_bus} minutes. Checking again in {loop_time:.1f} minutes...")
+        print(f"\nNext bus in {next_bus_minutes} minutes. Checking again in {loop_time} minutes...")
         print("=" * 60)
 
         # Sleep before checking again
-        t.sleep(int(loop_time * 60))
+        t.sleep(loop_time * 60) # loop_time is already int
         check_bus_226()  # recur
 
     except Exception as e:
         print(f"Error fetching Bus 226 predictions: {str(e)}")
-        print("Retrying in 5 minutes...")
-        t.sleep(5 * 60)
+        print(f"Retrying in {RETRY_ERROR_MINUTES} minutes...")
+        t.sleep(RETRY_ERROR_MINUTES * 60)
         check_bus_226()  # recur
 
 
@@ -130,6 +152,6 @@ if __name__ == "__main__":
         print("\nExiting Bus 226 Monitor. Have a safe trip!")
     except Exception as e:
         print(f"\nUnexpected error: {str(e)}")
-        print("Restarting in 5 minutes...")
-        t.sleep(5 * 60)
+        print(f"Restarting in {RETRY_ERROR_MINUTES} minutes...")
+        t.sleep(RETRY_ERROR_MINUTES * 60)
         check_bus_226()

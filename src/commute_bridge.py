@@ -18,6 +18,24 @@ except ImportError:
 # Load environment variables at module level
 load_dotenv()
 
+# --- Configuration Variables with Defaults ---
+# Alerting
+ALERT_LEAVE_NOW_WINDOW_MIN = int(os.environ.get('MBTA_ALERT_LEAVE_NOW_WINDOW_MIN_MINUTES', '5'))
+ALERT_LEAVE_NOW_WINDOW_MAX = int(os.environ.get('MBTA_ALERT_LEAVE_NOW_WINDOW_MAX_MINUTES', '10'))
+ALERT_SEVERE_DELAY_THRESHOLD = int(os.environ.get('MBTA_ALERT_SEVERE_DELAY_THRESHOLD_MINUTES', '60'))
+
+# Retry/Sleep Durations
+RETRY_NO_DATA_MINUTES = int(os.environ.get('MBTA_RETRY_NO_DATA_MINUTES', '3'))
+RETRY_ERROR_MINUTES = int(os.environ.get('MBTA_RETRY_ERROR_MINUTES', '5'))
+RETRY_NO_CONNECTION_MINUTES = int(os.environ.get('MBTA_RETRY_NO_CONNECTION_MINUTES', '5'))
+
+# Commute Bridge Specific
+BRIDGE_TRANSFER_TIME_MINUTES = int(os.environ.get('MBTA_BRIDGE_TRANSFER_TIME_MINUTES', '30'))
+BRIDGE_CHECK_BUFFER_MINUTES = int(os.environ.get('MBTA_BRIDGE_CHECK_BUFFER_MINUTES', '10'))
+BRIDGE_MIN_CHECK_INTERVAL_MINUTES = int(os.environ.get('MBTA_BRIDGE_MIN_CHECK_INTERVAL_MINUTES', '1'))
+BRIDGE_MAX_CHECK_INTERVAL_MINUTES = int(os.environ.get('MBTA_BRIDGE_MAX_CHECK_INTERVAL_MINUTES', '5'))
+# --- End Configuration Variables ---
+
 
 def get_train_times():
     """Get Red Line train departure times in minutes from now"""
@@ -75,32 +93,32 @@ def get_bus_times():
     return bus_times
 
 
-def find_connections(train_times, bus_times, min_travel_time=30):
-    """Find viable train-bus connections with minimum travel time"""
-    print(f"Finding optimal connections (minimum travel time: {min_travel_time} minutes)...")
+def find_connections(train_times, bus_times, transfer_time):
+    """Find viable train-bus connections with specified transfer time"""
+    # transfer_time is the time needed from user's train departure to being ready for the bus at Braintree
+    print(f"Finding optimal connections (train departure to bus readiness time: {transfer_time} minutes)...")
     connections = []
 
     for train_time in train_times:
         viable_buses = []
         for bus_time in bus_times:
-            # Check if there's enough time between train departure and bus departure
-            if bus_time >= (train_time + min_travel_time):
-                wait_at_braintree = bus_time - (train_time + min_travel_time)
+            # Check if bus departure is after train departure + transfer time
+            if bus_time >= (train_time + transfer_time):
+                wait_at_braintree = bus_time - (train_time + transfer_time)
                 viable_buses.append({
                     "bus_time": bus_time,
                     "wait_time": wait_at_braintree
                 })
 
         if viable_buses:
-            # Find the bus with minimum wait time
-            best_bus = min(viable_buses, key=lambda x: x["wait_time"])
+            # Find the bus with minimum wait time at Braintree for this train
+            best_bus_for_train = min(viable_buses, key=lambda x: x["wait_time"])
             connections.append({
                 "train_time": train_time,
-                "bus_time": best_bus["bus_time"],
-                "wait_time": best_bus["wait_time"],
-                "total_journey": best_bus["bus_time"] - train_time
+                "bus_time": best_bus_for_train["bus_time"],
+                "wait_time": best_bus_for_train["wait_time"], # This is wait time at Braintree
+                "total_journey_from_train_departure": best_bus_for_train["bus_time"] - train_time
             })
-
     return connections
 
 
@@ -123,9 +141,9 @@ def commute_bridge():
         train_times = get_train_times()
 
         if not train_times:
-            print("\nNo upcoming Red Line trains found. Checking again in 3 minutes...")
-            t.sleep(3 * 60)
-            commute_bridge()
+            print(f"\nNo upcoming Red Line trains found. Checking again in {RETRY_NO_DATA_MINUTES} minutes...")
+            t.sleep(RETRY_NO_DATA_MINUTES * 60)
+            commute_bridge() # recur
             return
 
         # Print upcoming train times
@@ -138,9 +156,9 @@ def commute_bridge():
         bus_times = get_bus_times()
 
         if not bus_times:
-            print("\nNo upcoming 226 buses found. Checking again in 3 minutes...")
-            t.sleep(3 * 60)
-            commute_bridge()
+            print(f"\nNo upcoming 226 buses found. Checking again in {RETRY_NO_DATA_MINUTES} minutes...")
+            t.sleep(RETRY_NO_DATA_MINUTES * 60)
+            commute_bridge() # recur
             return
 
         # Print upcoming bus times
@@ -149,17 +167,17 @@ def commute_bridge():
             departure_time = format_time(minutes)
             print(f"  Bus {i+1}: Departing in {minutes} minutes (at {departure_time})")
 
-        # Find viable connections with 30-minute minimum travel time
-        connections = find_connections(train_times, bus_times, min_travel_time=30)
+        # Find viable connections using configured transfer time
+        connections = find_connections(train_times, bus_times, transfer_time=BRIDGE_TRANSFER_TIME_MINUTES)
 
         if not connections:
-            print("\nNo viable train-bus connections found. Checking again in 5 minutes...")
-            t.sleep(5 * 60)
-            commute_bridge()
+            print(f"\nNo viable train-bus connections found. Checking again in {RETRY_NO_CONNECTION_MINUTES} minutes...")
+            t.sleep(RETRY_NO_CONNECTION_MINUTES * 60)
+            commute_bridge() # recur
             return
 
-        # Find the optimal connection (minimum total journey time)
-        optimal = min(connections, key=lambda x: x["total_journey"])
+        # Find the optimal connection (minimum total journey time from train departure)
+        optimal = min(connections, key=lambda x: x["total_journey_from_train_departure"])
 
         # Print connections in a table format
         print("\n" + "=" * 70)
@@ -173,7 +191,7 @@ def commute_bridge():
             train_time_str = f"{conn['train_time']} min ({format_time(conn['train_time'])})"
             bus_time_str = f"{conn['bus_time']} min ({format_time(conn['bus_time'])})"
             wait_time_str = f"{conn['wait_time']} min"
-            total_str = f"{conn['total_journey']} min"
+            total_str = f"{conn['total_journey_from_train_departure']} min"
 
             # Mark optimal connection
             marker = "→" if conn == optimal else " "
@@ -182,32 +200,35 @@ def commute_bridge():
 
         print("-" * 70)
         print(f"Optimal connection: Train in {optimal['train_time']} min → Bus in {optimal['bus_time']} min")
+        print(f" (Wait at Braintree: {optimal['wait_time']} min, Total from train dep: {optimal['total_journey_from_train_departure']} min)")
         print("=" * 70)
 
         # Determine if user should leave soon for the optimal train
-        if 5 <= optimal["train_time"] <= 10:
-            alert_message = (f"Time to leave! Catch the train in {optimal['train_time']} mins "
+        optimal_train_time = optimal["train_time"]
+        if ALERT_LEAVE_NOW_WINDOW_MIN <= optimal_train_time <= ALERT_LEAVE_NOW_WINDOW_MAX:
+            alert_message = (f"Time to leave! Catch the train in {optimal_train_time} mins "
                             f"to connect with bus in {optimal['bus_time']} mins. \n"
                             f"Wait time at Braintree: {optimal['wait_time']} mins.")
             print(f"\n*** TIME TO LEAVE NOW! ***\n{alert_message}")
             messagebox.showinfo("Commute Bridge Alert", alert_message)
-        elif optimal["train_time"] > 60:
-            alert_message = f"Severe train delays detected. Next train in {optimal['train_time']} mins."
+        elif optimal_train_time > ALERT_SEVERE_DELAY_THRESHOLD:
+            alert_message = f"Severe train delays detected. Next optimal train in {optimal_train_time} mins."
             print(f"\n!!! SEVERE DELAYS DETECTED !!!\n{alert_message}")
             messagebox.showinfo("Commute Bridge Alert", alert_message)
 
-        # Calculate time to sleep before checking again
-        next_check_time = min(5, max(1, optimal["train_time"] - 10))  # Check at least 10 mins before optimal train
-        print(f"\nChecking again in {next_check_time} minutes...")
+        # Calculate time to sleep before checking again using configurable parameters
+        next_check_time_calc = max(BRIDGE_MIN_CHECK_INTERVAL_MINUTES, min(BRIDGE_MAX_CHECK_INTERVAL_MINUTES, optimal_train_time - BRIDGE_CHECK_BUFFER_MINUTES))
+
+        print(f"\nChecking again in {next_check_time_calc} minutes...")
         print("=" * 70)
-        t.sleep(next_check_time * 60)
-        commute_bridge()
+        t.sleep(next_check_time_calc * 60)
+        commute_bridge() # recur
 
     except Exception as e:
         print(f"\nError in commute bridge: {str(e)}")
-        print("Retrying in 5 minutes...")
-        t.sleep(5 * 60)
-        commute_bridge()
+        print(f"Retrying in {RETRY_ERROR_MINUTES} minutes...")
+        t.sleep(RETRY_ERROR_MINUTES * 60)
+        commute_bridge() # recur
 
 
 if __name__ == "__main__":
@@ -219,6 +240,6 @@ if __name__ == "__main__":
         print("\nExiting commute bridge. Have a safe trip!")
     except Exception as e:
         print(f"\nUnexpected error: {str(e)}")
-        print("Restarting in 5 minutes...")
-        t.sleep(5 * 60)
-        commute_bridge()
+        print(f"Restarting in {RETRY_ERROR_MINUTES} minutes...") # Use configured error retry for unexpected
+        t.sleep(RETRY_ERROR_MINUTES * 60)
+        commute_bridge() # recur
